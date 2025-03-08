@@ -1,19 +1,36 @@
-﻿import React, { useState, useEffect } from 'react';
-import { Table } from '@/components/ui/table';
-import { Card } from '@/components/ui/card';
+﻿"use client";
+
+import { useState, useEffect } from 'react';
+import { PlusCircle, Settings2, Check, Loader2, RefreshCw, AlertCircle, X } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert } from '@/components/ui/alert';
-import { Form } from '@/components/ui/form';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableHead, 
+  TableHeader, 
+  TableRow 
+} from '@/components/ui/table';
+import { fetchImapSettings, createImapSetting, testImapConnection, syncEmails, ImapSetting, ImapSettingCreate } from '../api/services/route';
 
-import { fetchImapSettings, createImapSetting, testImapConnection, syncEmails } from '@/services/api';;
+interface Message {
+  type: 'success' | 'error' | 'info';
+  text: string;
+}
 
 export default function ImapSettings() {
-  const [settings, setSettings] = useState([]);
+  const [settings, setSettings] = useState<ImapSetting[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFormVisible, setIsFormVisible] = useState(false);
-  const [formData, setFormData] = useState({
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isTestingOrSyncing, setIsTestingOrSyncing] = useState<{[key: number]: string}>({});
+  const [message, setMessage] = useState<Message | null>(null);
+  
+  const [formData, setFormData] = useState<ImapSettingCreate>({
     email: '',
     server: '',
     port: 993,
@@ -22,11 +39,11 @@ export default function ImapSettings() {
     use_ssl: true,
     folder: 'INBOX'
   });
+  
   const [syncOptions, setSyncOptions] = useState({
     days_back: 30,
     limit: 50
   });
-  const [message, setMessage] = useState(null);
 
   useEffect(() => {
     loadSettings();
@@ -38,18 +55,60 @@ export default function ImapSettings() {
       const data = await fetchImapSettings();
       setSettings(data);
     } catch (err) {
-      console.error(err);
-      setMessage({ type: 'error', text: 'ไม่สามารถโหลดการตั้งค่า IMAP ได้' });
+      console.error('Failed to load IMAP settings:', err);
+      setMessage({ 
+        type: 'error', 
+        text: 'ไม่สามารถโหลดการตั้งค่า IMAP ได้ โปรดลองใหม่อีกครั้ง'
+      });
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSubmit = async (e) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value, type } = e.target;
+    
+    if (type === 'number') {
+      setFormData({
+        ...formData,
+        [name]: parseInt(value)
+      });
+    } else {
+      setFormData({
+        ...formData,
+        [name]: value
+      });
+    }
+  };
+
+  const handleCheckboxChange = (checked: boolean) => {
+    setFormData({
+      ...formData,
+      use_ssl: checked
+    });
+  };
+
+  const handleSyncOptionsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setSyncOptions({
+      ...syncOptions,
+      [name]: parseInt(value)
+    });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setMessage(null);
+
     try {
+      setIsSubmitting(true);
       await createImapSetting(formData);
-      setMessage({ type: 'success', text: 'เพิ่มการตั้งค่า IMAP สำเร็จ' });
+      
+      setMessage({ 
+        type: 'success', 
+        text: 'เพิ่มการตั้งค่า IMAP สำเร็จ'
+      });
+      
       setIsFormVisible(false);
       setFormData({
         email: '',
@@ -60,208 +119,413 @@ export default function ImapSettings() {
         use_ssl: true,
         folder: 'INBOX'
       });
-      loadSettings();
+      
+      await loadSettings();
+      
+      // ซ่อนข้อความแจ้งเตือนหลังจาก 3 วินาที
+      setTimeout(() => {
+        setMessage(null);
+      }, 3000);
     } catch (err) {
-      console.error(err);
-      setMessage({ type: 'error', text: 'ไม่สามารถเพิ่มการตั้งค่า IMAP ได้' });
+      console.error('Failed to create IMAP setting:', err);
+      setMessage({ 
+        type: 'error', 
+        text: 'ไม่สามารถเพิ่มการตั้งค่า IMAP ได้ โปรดตรวจสอบข้อมูลและลองใหม่อีกครั้ง'
+      });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleTest = async (id) => {
+  const handleTest = async (id: number) => {
     try {
+      setIsTestingOrSyncing(prev => ({ ...prev, [id]: 'testing' }));
+      setMessage(null);
+      
       const result = await testImapConnection(id);
+      
       if (result.status === 'success') {
-        setMessage({ type: 'success', text: 'เชื่อมต่อกับเซิร์ฟเวอร์ IMAP สำเร็จ' });
+        setMessage({ 
+          type: 'success', 
+          text: 'เชื่อมต่อกับเซิร์ฟเวอร์ IMAP สำเร็จ'
+        });
       } else {
-        setMessage({ type: 'error', text: 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ IMAP ได้' });
+        setMessage({ 
+          type: 'error', 
+          text: 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ IMAP ได้'
+        });
       }
+      
+      // ซ่อนข้อความแจ้งเตือนหลังจาก 3 วินาที
+      setTimeout(() => {
+        setMessage(null);
+      }, 3000);
     } catch (err) {
-      console.error(err);
-      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการทดสอบการเชื่อมต่อ' });
+      console.error('Failed to test IMAP connection:', err);
+      setMessage({ 
+        type: 'error', 
+        text: 'เกิดข้อผิดพลาดในการทดสอบการเชื่อมต่อ'
+      });
+    } finally {
+      setIsTestingOrSyncing(prev => {
+        const newState = { ...prev };
+        delete newState[id];
+        return newState;
+      });
     }
   };
 
-  const handleSync = async (id) => {
+  const handleSync = async (id: number) => {
     try {
+      setIsTestingOrSyncing(prev => ({ ...prev, [id]: 'syncing' }));
+      setMessage(null);
+      
       await syncEmails(id, syncOptions.days_back, syncOptions.limit);
-      setMessage({ type: 'success', text: 'เริ่มซิงค์อีเมลในเบื้องหลังแล้ว' });
+      
+      setMessage({ 
+        type: 'success', 
+        text: 'เริ่มซิงค์อีเมลในเบื้องหลังแล้ว'
+      });
+      
+      // อัปเดต last_sync ในข้อมูล
+      setSettings(prevSettings => {
+        return prevSettings.map(setting => {
+          if (setting.id === id) {
+            return {
+              ...setting,
+              last_sync: new Date().toISOString()
+            };
+          }
+          return setting;
+        });
+      });
+      
+      // ซ่อนข้อความแจ้งเตือนหลังจาก 3 วินาที
+      setTimeout(() => {
+        setMessage(null);
+      }, 3000);
     } catch (err) {
-      console.error(err);
-      setMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการซิงค์อีเมล' });
+      console.error('Failed to sync emails:', err);
+      setMessage({ 
+        type: 'error', 
+        text: 'เกิดข้อผิดพลาดในการซิงค์อีเมล'
+      });
+    } finally {
+      setIsTestingOrSyncing(prev => {
+        const newState = { ...prev };
+        delete newState[id];
+        return newState;
+      });
     }
   };
 
-  const columns = [
-    {
-      title: 'อีเมล',
-      dataIndex: 'email',
-      key: 'email'
-    },
-    {
-      title: 'เซิร์ฟเวอร์',
-      dataIndex: 'server',
-      key: 'server'
-    },
-    {
-      title: 'พอร์ต',
-      dataIndex: 'port',
-      key: 'port'
-    },
-    {
-      title: 'ซิงค์ล่าสุด',
-      key: 'last_sync',
-      render: (record) => record.last_sync ? 
-        new Date(record.last_sync).toLocaleString('th-TH') : 
-        'ไม่เคยซิงค์'
-    },
-    {
-      title: 'จัดการ',
-      key: 'actions',
-      render: (record) => (
-        <div className="flex gap-2">
-          <Button onClick={() => handleTest(record.id)}>ทดสอบ</Button>
-          <Button onClick={() => handleSync(record.id)}>ซิงค์</Button>
-        </div>
-      )
+  // ฟอร์แมตวันที่และเวลา
+  const formatDateTime = (dateString: string | undefined): string => {
+    if (!dateString) return 'ไม่เคยซิงค์';
+    
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleString('th-TH', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      return 'ไม่เคยซิงค์';
     }
-  ];
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-muted-foreground">กำลังโหลดข้อมูล...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-6">การตั้งค่า IMAP</h1>
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold">การตั้งค่า IMAP</h1>
       
       {message && (
-        <Alert 
-          type={message.type} 
-          className="mb-4"
-          onClose={() => setMessage(null)}
-        >
-          {message.text}
+        <Alert className={
+          message.type === 'success' ? 'bg-green-50 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+          message.type === 'error' ? 'bg-red-50 text-red-800 dark:bg-red-900/30 dark:text-red-400' : ''
+        }>
+          <div className="flex items-center">
+            {message.type === 'success' && <Check className="h-4 w-4 mr-2" />}
+            {message.type === 'error' && <AlertCircle className="h-4 w-4 mr-2" />}
+            {message.text}
+          </div>
         </Alert>
       )}
       
-      <div className="mb-4">
-        <Button onClick={() => setIsFormVisible(!isFormVisible)}>
-          {isFormVisible ? 'ซ่อนฟอร์ม' : 'เพิ่มการตั้งค่า IMAP'}
+      <div className="flex justify-between items-center">
+        <Button 
+          onClick={() => setIsFormVisible(!isFormVisible)}
+          className="flex items-center"
+        >
+          {isFormVisible ? (
+            <>
+              <X className="h-4 w-4 mr-2" />
+              ซ่อนฟอร์ม
+            </>
+          ) : (
+            <>
+              <PlusCircle className="h-4 w-4 mr-2" />
+              เพิ่มการตั้งค่า IMAP
+            </>
+          )}
+        </Button>
+        
+        <Button 
+          variant="outline"
+          onClick={loadSettings}
+          className="flex items-center"
+        >
+          <RefreshCw className="h-4 w-4 mr-2" />
+          รีเฟรช
         </Button>
       </div>
       
       {isFormVisible && (
-        <Card className="p-4 mb-6">
-          <h2 className="text-xl font-bold mb-4">เพิ่มการตั้งค่า IMAP</h2>
-          
-          <Form onSubmit={handleSubmit}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block mb-1">อีเมล</label>
-                <Input
-                  required
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({...formData, email: e.target.value})}
-                />
+        <Card>
+          <CardHeader>
+            <CardTitle>เพิ่มการตั้งค่า IMAP</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium" htmlFor="email">
+                    อีเมล <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    id="email"
+                    name="email"
+                    type="email"
+                    value={formData.email}
+                    onChange={handleInputChange}
+                    placeholder="your@email.com"
+                    required
+                    disabled={isSubmitting}
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-sm font-medium" htmlFor="server">
+                    เซิร์ฟเวอร์ IMAP <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    id="server"
+                    name="server"
+                    value={formData.server}
+                    onChange={handleInputChange}
+                    placeholder="imap.example.com"
+                    required
+                    disabled={isSubmitting}
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-sm font-medium" htmlFor="port">
+                    พอร์ต <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    id="port"
+                    name="port"
+                    type="number"
+                    value={formData.port}
+                    onChange={handleInputChange}
+                    required
+                    disabled={isSubmitting}
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-sm font-medium" htmlFor="username">
+                    ชื่อผู้ใช้ <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    id="username"
+                    name="username"
+                    value={formData.username}
+                    onChange={handleInputChange}
+                    placeholder="username หรือ email"
+                    required
+                    disabled={isSubmitting}
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-sm font-medium" htmlFor="password">
+                    รหัสผ่าน <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    id="password"
+                    name="password"
+                    type="password"
+                    value={formData.password}
+                    onChange={handleInputChange}
+                    required
+                    disabled={isSubmitting}
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-sm font-medium" htmlFor="folder">
+                    โฟลเดอร์
+                  </label>
+                  <Input
+                    id="folder"
+                    name="folder"
+                    value={formData.folder}
+                    onChange={handleInputChange}
+                    placeholder="INBOX"
+                    disabled={isSubmitting}
+                  />
+                </div>
+                
+                <div className="flex items-center space-x-2 pt-4">
+                  <Checkbox
+                    id="use_ssl"
+                    checked={formData.use_ssl}
+                    onCheckedChange={handleCheckboxChange}
+                    disabled={isSubmitting}
+                  />
+                  <label
+                    htmlFor="use_ssl"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                  >
+                    ใช้ SSL
+                  </label>
+                </div>
               </div>
               
-              <div>
-                <label className="block mb-1">เซิร์ฟเวอร์</label>
-                <Input
-                  required
-                  value={formData.server}
-                  onChange={(e) => setFormData({...formData, server: e.target.value})}
-                  placeholder="เช่น imap.gmail.com"
-                />
+              <div className="flex justify-end">
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      กำลังบันทึก...
+                    </>
+                  ) : 'บันทึก'}
+                </Button>
               </div>
-              
-              <div>
-                <label className="block mb-1">พอร์ต</label>
-                <Input
-                  required
-                  type="number"
-                  value={formData.port}
-                  onChange={(e) => setFormData({...formData, port: parseInt(e.target.value)})}
-                />
-              </div>
-              
-              <div>
-                <label className="block mb-1">ชื่อผู้ใช้</label>
-                <Input
-                  required
-                  value={formData.username}
-                  onChange={(e) => setFormData({...formData, username: e.target.value})}
-                />
-              </div>
-              
-              <div>
-                <label className="block mb-1">รหัสผ่าน</label>
-                <Input
-                  required
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) => setFormData({...formData, password: e.target.value})}
-                />
-              </div>
-              
-              <div>
-                <label className="block mb-1">โฟลเดอร์</label>
-                <Input
-                  value={formData.folder}
-                  onChange={(e) => setFormData({...formData, folder: e.target.value})}
-                  placeholder="INBOX"
-                />
-              </div>
-              
-              <div className="flex items-center">
-                <Checkbox
-                  checked={formData.use_ssl}
-                  onChange={(e) => setFormData({...formData, use_ssl: e.target.checked})}
-                />
-                <label className="ml-2">ใช้ SSL</label>
-              </div>
-            </div>
-            
-            <div className="mt-4">
-              <Button type="submit">บันทึก</Button>
-            </div>
-          </Form>
+            </form>
+          </CardContent>
         </Card>
       )}
       
       {/* ตั้งค่าการซิงค์ */}
-      <Card className="p-4 mb-6">
-        <h2 className="text-xl font-bold mb-4">ตั้งค่าการซิงค์</h2>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block mb-1">ดึงข้อมูลย้อนหลัง (วัน)</label>
-            <Input
-              type="number"
-              value={syncOptions.days_back}
-              onChange={(e) => setSyncOptions({...syncOptions, days_back: parseInt(e.target.value)})}
-              min="1"
-              max="3650"
-            />
+      <Card>
+        <CardHeader>
+          <CardTitle>ตั้งค่าการซิงค์</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="days_back">
+                ดึงข้อมูลย้อนหลัง (วัน)
+              </label>
+              <Input
+                id="days_back"
+                name="days_back"
+                type="number"
+                value={syncOptions.days_back}
+                onChange={handleSyncOptionsChange}
+                min="1"
+                max="3650"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="limit">
+                จำนวนอีเมลสูงสุด
+              </label>
+              <Input
+                id="limit"
+                name="limit"
+                type="number"
+                value={syncOptions.limit}
+                onChange={handleSyncOptionsChange}
+                min="1"
+                max="1000"
+              />
+            </div>
           </div>
-          
-          <div>
-            <label className="block mb-1">จำนวนอีเมลสูงสุด</label>
-            <Input
-              type="number"
-              value={syncOptions.limit}
-              onChange={(e) => setSyncOptions({...syncOptions, limit: parseInt(e.target.value)})}
-              min="1"
-              max="1000"
-            />
-          </div>
-        </div>
+        </CardContent>
       </Card>
       
       {/* ตารางการตั้งค่า IMAP */}
-      <Table
-        dataSource={settings}
-        columns={columns}
-        loading={isLoading}
-        rowKey="id"
-      />
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>อีเมล</TableHead>
+                <TableHead>เซิร์ฟเวอร์</TableHead>
+                <TableHead>พอร์ต</TableHead>
+                <TableHead>ซิงค์ล่าสุด</TableHead>
+                <TableHead className="text-right">จัดการ</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {settings.length > 0 ? (
+                settings.map((setting) => (
+                  <TableRow key={setting.id}>
+                    <TableCell className="font-medium">{setting.email}</TableCell>
+                    <TableCell>{setting.server}</TableCell>
+                    <TableCell>{setting.port}</TableCell>
+                    <TableCell>{formatDateTime(setting.last_sync)}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleTest(setting.id)}
+                          disabled={!!isTestingOrSyncing[setting.id]}
+                        >
+                          {isTestingOrSyncing[setting.id] === 'testing' ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              กำลังทดสอบ...
+                            </>
+                          ) : 'ทดสอบ'}
+                        </Button>
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => handleSync(setting.id)}
+                          disabled={!!isTestingOrSyncing[setting.id]}
+                        >
+                          {isTestingOrSyncing[setting.id] === 'syncing' ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              กำลังซิงค์...
+                            </>
+                          ) : 'ซิงค์'}
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={5} className="h-24 text-center">
+                    ไม่พบการตั้งค่า IMAP
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   );
 }
